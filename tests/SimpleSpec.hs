@@ -120,18 +120,6 @@ spec = do
               getSocketOption sock UserTimeout `shouldReturn` 2000
               close sock
 
-    describe "getPeerCredential" $ do
-        it "can return something" $ do
-            when isUnixDomainSocketAvailable $ do
-                (x,_) <- socketPair AF_UNIX Stream defaultProtocol
-                (_,muid,_) <- getPeerCredential x
-                muid `shouldNotBe` Nothing
-        it "return nothing for non-UNIX-domain socket" $ do
-            when isUnixDomainSocketAvailable $ do
-                s <- socket AF_INET Stream defaultProtocol
-                cred1 <- getPeerCredential s
-                cred1 `shouldBe` (Nothing,Nothing,Nothing)
-
     describe "getAddrInfo" $ do
         it "works for IPv4 address" $ do
             let hints = defaultHints { addrFlags = [AI_NUMERICHOST, AI_ADDRCONFIG] }
