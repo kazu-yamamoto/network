@@ -122,5 +122,5 @@ spec = do
             when isUnixDomainSocketAvailable $ do
                 let abstractAddress = toEnum 0:"/haskell/network/abstract-longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
                 sock <- socket AF_UNIX Stream defaultProtocol
-                bind sock (SockAddrUnix abstractAddress) `shouldThrow` anyIOException
+                bind sock (SockAddrUnix abstractAddress) `shouldThrow` anyErrorCall
 #endif
