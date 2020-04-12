@@ -237,6 +237,10 @@ spec = do
                     print RecvIPv4TOS
                     print RecvIPv4PktInfo
                     print cmsgs
+                    print =<< getSocketOption sock RecvIPv4TOS
+                    print CmsgIdIPv4TTL
+                    print CmsgIdIPv4TOS
+                    print CmsgIdIPv4PktInfo
                     whenSupported RecvIPv4TTL $
                       ((lookupCmsg CmsgIdIPv4TTL cmsgs >>= decodeCmsg) :: Maybe IPv4TTL) `shouldNotBe` Nothing
                     whenSupported RecvIPv4TOS $
