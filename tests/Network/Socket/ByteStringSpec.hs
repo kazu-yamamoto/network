@@ -233,7 +233,10 @@ spec = do
                     whenSupported RecvIPv4TOS     $ setSocketOption sock RecvIPv4TOS 1
                     whenSupported RecvIPv4PktInfo $ setSocketOption sock RecvIPv4PktInfo 1
                     (_, _, cmsgs, _) <- recvMsg sock 1024 128 mempty
-
+                    print RecvIPv4TTL
+                    print RecvIPv4TOS
+                    print RecvIPv4PktInfo
+                    print cmsgs
                     whenSupported RecvIPv4TTL $
                       ((lookupCmsg CmsgIdIPv4TTL cmsgs >>= decodeCmsg) :: Maybe IPv4TTL) `shouldNotBe` Nothing
                     whenSupported RecvIPv4TOS $
