@@ -64,14 +64,7 @@ gracefulClose s tmout = sendRecvFIN `E.finally` close s
         -- Sending TCP FIN.
         shutdown s ShutdownSend
         -- Waiting TCP FIN.
-#if defined(mingw32_HOST_OS)
         recvEOFloop
-#else
-        mevmgr <- Ev.getSystemEventManager
-        case mevmgr of
-          Nothing    -> recvEOFloop     -- non-threaded RTS
-          Just evmgr -> recvEOFev evmgr
-#endif
     -- milliseconds. Taken from BSD fast clock value.
     clock = 200
     recvEOFloop = E.bracket (mallocBytes bufSize) free $ loop 0
@@ -87,39 +80,6 @@ gracefulClose s tmout = sendRecvFIN `E.finally` close s
             when (r == -1 && delay' < tmout) $ do
                 threadDelay (clock * 1000)
                 loop delay' buf
-#if !defined(mingw32_HOST_OS)
-    recvEOFev evmgr = do
-        tmmgr <- Ev.getSystemTimerManager
-        mvar <- newEmptyMVar
-        E.bracket (register evmgr tmmgr mvar) (unregister evmgr tmmgr) $ \_ -> do
-            wait <- takeMVar mvar
-            case wait of
-              TimeoutTripped -> return ()
-              -- We don't check the (positive) length.
-              -- In normal case, it's 0. That is, only FIN is received.
-              -- In error cases, data is available. But there is no
-              -- application which can read it. So, let's stop receiving
-              -- to prevent attacks.
-              MoreData       -> E.bracket (mallocBytes bufSize)
-                                          free
-                                          (\buf -> void $ recvBufNoWait s buf bufSize)
-    register evmgr tmmgr mvar = do
-        -- millisecond to microsecond
-        key1 <- Ev.registerTimeout tmmgr (tmout * 1000) $
-            putMVar mvar TimeoutTripped
-        key2 <- withFdSocket s $ \fd' -> do
-            let callback _ _ = putMVar mvar MoreData
-                fd = Fd fd'
-#if __GLASGOW_HASKELL__ < 709
-            Ev.registerFd evmgr callback fd Ev.evtRead
-#else
-            Ev.registerFd evmgr callback fd Ev.evtRead Ev.OneShot
-#endif
-        return (key1, key2)
-    unregister evmgr tmmgr (key1,key2) = do
-        Ev.unregisterTimeout tmmgr key1
-        Ev.unregisterFd evmgr key2
-#endif
     -- Don't use 4092 here. The GHC runtime takes the global lock
     -- if the length is over 3276 bytes in 32bit or 3272 bytes in 64bit.
     bufSize = 1024
