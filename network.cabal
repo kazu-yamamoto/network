@@ -162,6 +162,7 @@ library
             Network.Socket.Win32.Cmsg
             Network.Socket.Win32.CmsgHdr
             Network.Socket.Win32.HostName
+            Network.Socket.Win32.Load
             Network.Socket.Win32.WSABuf
             Network.Socket.Win32.MsgHdr
 

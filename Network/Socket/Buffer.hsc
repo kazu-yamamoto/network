@@ -32,6 +32,7 @@ import System.IO.Error (mkIOError, ioeSetErrorString, catchIOError)
 #if defined(mingw32_HOST_OS)
 import GHC.IO.FD (FD(..), readRawBufferPtr, writeRawBufferPtr)
 import Network.Socket.Win32.CmsgHdr
+import Network.Socket.Win32.Load
 import Network.Socket.Win32.MsgHdr
 import Network.Socket.Win32.WSABuf
 ## if __IO_MANAGER_WINIO__ >= 2
@@ -251,7 +252,12 @@ recvBufFromWinIO s ptr nbytes =
                 -- would hang forever).
                 err <- c_WSAGetLastError
                 if ret == 0
-                    then return $ Mgr.CbDone Nothing
+                    -- An overlapped socket queues a completion packet even when
+                    -- the call succeeds synchronously, so let the I/O manager
+                    -- resolve it.  CbDone Nothing makes it read an OVERLAPPED
+                    -- that may not be filled in yet, which surfaces as a
+                    -- spurious EOF.
+                    then return Mgr.CbPending
                     else if err == _ERROR_IO_PENDING
                         then return Mgr.CbPending
                         else return $ Mgr.CbError (fromIntegral err)
@@ -328,7 +334,12 @@ recvBufWinIO s ptr nbytes = withFdSocket s $ \sock ->
                 -- would hang forever).
                 err <- c_WSAGetLastError
                 if ret == 0
-                    then return $ Mgr.CbDone Nothing
+                    -- An overlapped socket queues a completion packet even when
+                    -- the call succeeds synchronously, so let the I/O manager
+                    -- resolve it.  CbDone Nothing makes it read an OVERLAPPED
+                    -- that may not be filled in yet, which surfaces as a
+                    -- spurious EOF.
+                    then return Mgr.CbPending
                     else if err == _ERROR_IO_PENDING
                         then return Mgr.CbPending
                         else return $ Mgr.CbError (fromIntegral err)
@@ -519,37 +530,40 @@ foreign import CALLCONV SAFE_ON_WIN "ioctlsocket"
   c_ioctlsocket :: CSocket -> CLong -> Ptr CULong -> IO CInt
 foreign import CALLCONV SAFE_ON_WIN "WSAGetLastError"
   c_WSAGetLastError :: IO CInt
-foreign import CALLCONV SAFE_ON_WIN "WSASendMsg"
-  -- fixme Handle for SOCKET, see #426
-  c_sendmsg :: CSocket -> Ptr (MsgHdr sa) -> DWORD -> LPDWORD -> Ptr () -> Ptr ()  -> IO CInt
 foreign import CALLCONV unsafe "WSASend"
   c_WSASend :: CSocket -> Ptr WSABuf -> DWORD -> LPDWORD -> DWORD -> Ptr () -> Ptr () -> IO CInt
 foreign import CALLCONV unsafe "WSASendTo"
   c_WSASendTo :: CSocket -> Ptr WSABuf -> DWORD -> LPDWORD -> DWORD -> Ptr sa -> CInt -> Ptr () -> Ptr () -> IO CInt
-foreign import CALLCONV SAFE_ON_WIN "WSARecvMsg"
-  c_recvmsg_mio :: CSocket -> Ptr (MsgHdr sa) -> LPDWORD -> Ptr () -> Ptr () -> IO CInt
 foreign import CALLCONV unsafe "WSARecv"
   c_WSARecv :: CSocket -> Ptr WSABuf -> DWORD -> LPDWORD -> LPDWORD -> Ptr () -> Ptr () -> IO CInt
 foreign import CALLCONV unsafe "WSARecvFrom"
   c_WSARecvFrom :: CSocket -> Ptr WSABuf -> DWORD -> LPDWORD -> LPDWORD -> Ptr sa -> Ptr CInt -> Ptr () -> Ptr () -> IO CInt
-## if __IO_MANAGER_WINIO__ >= 2
-foreign import CALLCONV unsafe "WSARecvMsg"
-  c_recvmsg_winio :: CSocket -> Ptr (MsgHdr sa) -> LPDWORD -> Ptr () -> Ptr () -> IO CInt
-## endif
+
+-- Winsock can leave the control buffer pointing at garbage once the
+-- message was truncated, so clear it.  The C wrapper around WSARecvMsg
+-- used to do this.
+clearCtrlOnTruncation :: Ptr (MsgHdr sa) -> CInt -> IO ()
+clearCtrlOnTruncation msgHdrPtr ret = when (ret == -1) $ do
+    err <- c_WSAGetLastError
+    when (err == #{const WSAEMSGSIZE}) $ do
+        (#poke WSAMSG, Control.len) msgHdrPtr (0 :: Word32)
+        (#poke WSAMSG, Control.buf) msgHdrPtr (nullPtr :: Ptr Word8)
 
 sendBufMsgMIO :: Socket -> CSocket -> Ptr (MsgHdr sa) -> CInt -> IO CInt
-sendBufMsgMIO s fd msgHdrPtr cflags =
+sendBufMsgMIO s fd msgHdrPtr cflags = do
+  sendMsg <- mkSendMsgSafe <$> getWSASendMsg fd
   throwSocketErrorWaitWrite s "Network.Socket.Buffer.sendMsg" $
     alloca $ \send_ptr ->
-      c_sendmsg fd msgHdrPtr (fromIntegral cflags) send_ptr nullPtr nullPtr
+      sendMsg fd (castPtr msgHdrPtr) (fromIntegral cflags) send_ptr nullPtr nullPtr
 
 ## if __IO_MANAGER_WINIO__ >= 2
 sendBufMsgWinIO :: CSocket -> Ptr (MsgHdr sa) -> CInt -> IO CInt
-sendBufMsgWinIO fd msgHdrPtr cflags =
+sendBufMsgWinIO fd msgHdrPtr cflags = do
+  sendMsg <- mkSendMsgUnsafe <$> getWSASendMsg fd
   fmap fromIntegral $ Mgr.withException "sendBufMsg" $
     Mgr.withOverlapped "sendBufMsg" (wordPtrToPtr $ fromIntegral fd) 0
       (\lpOverlapped -> do
-        ret <- c_sendmsg fd msgHdrPtr (fromIntegral cflags) nullPtr
+        ret <- sendMsg fd (castPtr msgHdrPtr) (fromIntegral cflags) nullPtr
                  (castPtr lpOverlapped) nullPtr
         if ret == 0
           then return Mgr.CbPending
@@ -564,22 +578,28 @@ sendBufMsgWinIO fd msgHdrPtr cflags =
 
 -- Helper functions for recvBufMsg on Windows
 recvBufMsgMIO :: Socket -> CSocket -> Ptr (MsgHdr sa) -> IO Int
-recvBufMsgMIO s fd msgHdrPtr = alloca $ \len_ptr -> do
-    _ <- throwSocketErrorWaitReadBut (== #{const WSAEMSGSIZE}) s "Network.Socket.Buffer.recvmsg" $
-            c_recvmsg_mio fd msgHdrPtr len_ptr nullPtr nullPtr
-    fromIntegral <$> peek len_ptr
+recvBufMsgMIO s fd msgHdrPtr = do
+    recvMsg <- mkRecvMsgSafe <$> getWSARecvMsg fd
+    alloca $ \len_ptr -> do
+      _ <- throwSocketErrorWaitReadBut (== #{const WSAEMSGSIZE}) s "Network.Socket.Buffer.recvmsg" $ do
+              ret <- recvMsg fd (castPtr msgHdrPtr) len_ptr nullPtr nullPtr
+              clearCtrlOnTruncation msgHdrPtr ret
+              return ret
+      fromIntegral <$> peek len_ptr
 
 ## if __IO_MANAGER_WINIO__ >= 2
 recvBufMsgWinIO :: CSocket -> Ptr (MsgHdr sa) -> IO Int
 recvBufMsgWinIO fd msgHdrPtr = do
     -- Perform async WSARecvMsg using withOverlapped
     -- (socket already associated in socket creation)
+    recvMsg <- mkRecvMsgUnsafe <$> getWSARecvMsg fd
     fmap fromIntegral $ Mgr.withException "recvMsg" $
-      Mgr.withOverlapped "recvMsg" (wordPtrToPtr $ fromIntegral fd) 0 startCB completionCB
+      Mgr.withOverlapped "recvMsg" (wordPtrToPtr $ fromIntegral fd) 0 (startCB recvMsg) completionCB
   where
-    startCB :: Mgr.LPOVERLAPPED -> IO (Mgr.CbResult Int)
-    startCB lpOverlapped = do
-        ret <- c_recvmsg_winio fd msgHdrPtr nullPtr (castPtr lpOverlapped) nullPtr
+    startCB :: WSARecvMsgFn -> Mgr.LPOVERLAPPED -> IO (Mgr.CbResult Int)
+    startCB recvMsg lpOverlapped = do
+        ret <- recvMsg fd (castPtr msgHdrPtr) nullPtr (castPtr lpOverlapped) nullPtr
+        clearCtrlOnTruncation msgHdrPtr ret
         -- Check WSAGetLastError immediately: if the operation didn't
         -- complete synchronously (ret /= 0), we must distinguish
         -- ERROR_IO_PENDING (async completion forthcoming) from real
@@ -587,7 +607,12 @@ recvBufMsgWinIO fd msgHdrPtr = do
         -- would hang forever).
         err <- c_WSAGetLastError
         if ret == 0
-            then return $ Mgr.CbDone Nothing
+            -- An overlapped socket queues a completion packet even when
+            -- the call succeeds synchronously, so let the I/O manager
+            -- resolve it.  CbDone Nothing makes it read an OVERLAPPED
+            -- that may not be filled in yet, which surfaces as a
+            -- spurious EOF.
+            then return Mgr.CbPending
             else if err == _ERROR_IO_PENDING
                 then return Mgr.CbPending
                 else return $ Mgr.CbError (fromIntegral err)
