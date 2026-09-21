@@ -252,7 +252,12 @@ recvBufFromWinIO s ptr nbytes =
                 -- would hang forever).
                 err <- c_WSAGetLastError
                 if ret == 0
-                    then return $ Mgr.CbDone Nothing
+                    -- An overlapped socket queues a completion packet even when
+                    -- the call succeeds synchronously, so let the I/O manager
+                    -- resolve it.  CbDone Nothing makes it read an OVERLAPPED
+                    -- that may not be filled in yet, which surfaces as a
+                    -- spurious EOF.
+                    then return Mgr.CbPending
                     else if err == _ERROR_IO_PENDING
                         then return Mgr.CbPending
                         else return $ Mgr.CbError (fromIntegral err)
@@ -329,7 +334,12 @@ recvBufWinIO s ptr nbytes = withFdSocket s $ \sock ->
                 -- would hang forever).
                 err <- c_WSAGetLastError
                 if ret == 0
-                    then return $ Mgr.CbDone Nothing
+                    -- An overlapped socket queues a completion packet even when
+                    -- the call succeeds synchronously, so let the I/O manager
+                    -- resolve it.  CbDone Nothing makes it read an OVERLAPPED
+                    -- that may not be filled in yet, which surfaces as a
+                    -- spurious EOF.
+                    then return Mgr.CbPending
                     else if err == _ERROR_IO_PENDING
                         then return Mgr.CbPending
                         else return $ Mgr.CbError (fromIntegral err)
@@ -597,7 +607,12 @@ recvBufMsgWinIO fd msgHdrPtr = do
         -- would hang forever).
         err <- c_WSAGetLastError
         if ret == 0
-            then return $ Mgr.CbDone Nothing
+            -- An overlapped socket queues a completion packet even when
+            -- the call succeeds synchronously, so let the I/O manager
+            -- resolve it.  CbDone Nothing makes it read an OVERLAPPED
+            -- that may not be filled in yet, which surfaces as a
+            -- spurious EOF.
+            then return Mgr.CbPending
             else if err == _ERROR_IO_PENDING
                 then return Mgr.CbPending
                 else return $ Mgr.CbError (fromIntegral err)
