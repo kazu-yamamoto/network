@@ -15,7 +15,9 @@
   [#622](https://github.com/haskell/network/pull/622)
 * WINIO: loading WSASendMsg and WSARecvMsg from Haskell so that they can be
   issued asynchronously.
+  [#626](https://github.com/haskell/network/pull/626)
 * WINIO: fixing a spurious EOF when a recv completes synchronously.
+  [#626](https://github.com/haskell/network/pull/626)
 
 ## Version 3.2.8.0
 
