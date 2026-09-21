@@ -58,6 +58,9 @@ import System.Posix.Types (Fd(..))
 
 import Network.Socket.Flag
 import Network.Socket.SockAddr (annotateWithSocket)
+#if defined(mingw32_HOST_OS)
+import Network.Socket.Win32.Load
+#endif
 
 #if !defined(mingw32_HOST_OS)
 import Network.Socket.Posix.Cmsg
@@ -216,11 +219,12 @@ sendManyTo s cs addr = sendManyTo' `annotateWithSocket` (s, Nothing)
                 , msgCtrlLen   = 0
                 , msgFlags     = 0
                 }
-          withFdSocket s $ \fd ->
+          withFdSocket s $ \fd -> do
+              sendMsg <- mkSendMsgSafe <$> getWSASendMsg fd
               with msgHdr $ \msgHdrPtr ->
                 alloca $ \send_ptr -> do
                   _ <- throwSocketErrorWaitWrite s "Network.Socket.ByteString.sendManyTo" $
-                          c_sendmsg fd msgHdrPtr 0 send_ptr nullPtr nullPtr
+                          sendMsg fd (castPtr msgHdrPtr) 0 send_ptr nullPtr nullPtr
                   peek send_ptr
 #endif
 

@@ -23,63 +23,37 @@ unsigned int cmsg_len(unsigned int l) {
   return (WSA_CMSG_LEN(l));
 }
 
-static LPFN_WSASENDMSG ptr_SendMsg;
-static LPFN_WSARECVMSG ptr_RecvMsg;
-/* GUIDS to lookup WSASend/RecvMsg */
+/* GUIDs to look up WSASendMsg/WSARecvMsg.  Winsock does not export them
+   as ordinary symbols; they have to be fetched from a live socket.  The
+   caching lives in Haskell (Network.Socket.Win32.Load) so that the call
+   itself can be issued asynchronously from there.  */
 static GUID WSARecvMsgGUID = WSAID_WSARECVMSG;
 static GUID WSASendMsgGUID = WSAID_WSASENDMSG;
 
-int WINAPI
-WSASendMsg (SOCKET s, LPWSAMSG lpMsg, DWORD flags,
-            LPDWORD lpdwNumberOfBytesRecvd, LPWSAOVERLAPPED lpOverlapped,
-            LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine) {
+LPFN_WSASENDMSG loadWSASendMsg (SOCKET s) {
+  LPFN_WSASENDMSG fn = NULL;
+  DWORD len;
 
-  if (!ptr_SendMsg) {
-    DWORD len;
-    if (WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER,
-        &WSASendMsgGUID, sizeof(WSASendMsgGUID), &ptr_SendMsg,
-        /* Sadly we can't perform this async for now as C code can't wait for
-           completion events from the Haskell RTS.  This needs to be moved to
-           Haskell on a re-designed async Network.  */
-        sizeof(ptr_SendMsg), &len, NULL, NULL) != 0)
-      return -1;
-  }
+  if (WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER,
+               &WSASendMsgGUID, sizeof(WSASendMsgGUID), &fn, sizeof(fn),
+               &len, NULL, NULL) != 0)
+    return NULL;
 
-  return ptr_SendMsg (s, lpMsg, flags, lpdwNumberOfBytesRecvd, lpOverlapped,
-                      lpCompletionRoutine);
+  return fn;
 }
 
-/**
- * WSARecvMsg function
- */
-int WINAPI
-WSARecvMsg (SOCKET s, LPWSAMSG lpMsg, LPDWORD lpdwNumberOfBytesRecvd,
-            LPWSAOVERLAPPED lpOverlapped,
-            LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine) {
+LPFN_WSARECVMSG loadWSARecvMsg (SOCKET s) {
+  LPFN_WSARECVMSG fn = NULL;
+  DWORD len;
 
-  if (!ptr_RecvMsg) {
-    DWORD len;
-    if (WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER,
-        &WSARecvMsgGUID, sizeof(WSARecvMsgGUID), &ptr_RecvMsg,
-        /* Sadly we can't perform this async for now as C code can't wait for
-           completion events from the Haskell RTS.  This needs to be moved to
-           Haskell on a re-designed async Network.  */
-        sizeof(ptr_RecvMsg), &len, NULL, NULL) != 0)
-      return -1;
-  }
+  if (WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER,
+               &WSARecvMsgGUID, sizeof(WSARecvMsgGUID), &fn, sizeof(fn),
+               &len, NULL, NULL) != 0)
+    return NULL;
 
-  int res = ptr_RecvMsg (s, lpMsg, lpdwNumberOfBytesRecvd, lpOverlapped,
-                         lpCompletionRoutine);
-
-  /*  If the msg was truncated then this pointer can be garbage.  */
-  if (res == SOCKET_ERROR && GetLastError () == WSAEMSGSIZE)
-     {
-        lpMsg->Control.len = 0;
-        lpMsg->Control.buf = NULL;
-     }
-
-  return res;
+  return fn;
 }
+
 #else
 struct cmsghdr *cmsg_firsthdr(struct msghdr *mhdr) {
   return (CMSG_FIRSTHDR(mhdr));

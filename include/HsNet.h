@@ -101,18 +101,16 @@ extern unsigned int
 cmsg_len(unsigned int l);
 
 /**
- * WSASendMsg function
+ * Fetch the WSASendMsg extension function, or NULL on failure.
  */
-extern WINAPI int
-WSASendMsg (SOCKET, LPWSAMSG, DWORD, LPDWORD,
-            LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+extern LPFN_WSASENDMSG
+loadWSASendMsg (SOCKET);
 
 /**
- * WSARecvMsg function
+ * Fetch the WSARecvMsg extension function, or NULL on failure.
  */
-extern WINAPI int
-WSARecvMsg (SOCKET, LPWSAMSG, LPDWORD,
-            LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+extern LPFN_WSARECVMSG
+loadWSARecvMsg (SOCKET);
 #else  /* _WIN32 */
 extern int
 sendFd(int sock, int outfd);

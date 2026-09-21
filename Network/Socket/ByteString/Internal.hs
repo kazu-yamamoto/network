@@ -14,11 +14,11 @@ module Network.Socket.ByteString.Internal
       mkInvalidRecvArgError
 #if !defined(mingw32_HOST_OS)
     , c_writev
+    , c_sendmsg
+    , c_recvmsg
 #else
     , c_wsasend
 #endif
-    , c_sendmsg
-    , c_recvmsg
     ) where
 
 #include "HsNetDef.h"
@@ -39,7 +39,6 @@ import Foreign.C.Types
 import Foreign.Ptr
 
 import Network.Socket.Win32.WSABuf (WSABuf)
-import Network.Socket.Win32.MsgHdr (MsgHdr)
 import Network.Socket.Types
 
 type DWORD   = Word32
@@ -64,8 +63,6 @@ foreign import ccall unsafe "recvmsg"
   -- fixme Handle for SOCKET, see #426
 foreign import CALLCONV SAFE_ON_WIN "WSASend"
   c_wsasend :: CSocket -> Ptr WSABuf -> DWORD -> LPDWORD -> DWORD -> Ptr () -> Ptr () -> IO CInt
-foreign import CALLCONV SAFE_ON_WIN "WSASendMsg"
-  c_sendmsg :: CSocket -> Ptr (MsgHdr SockAddr) -> DWORD -> LPDWORD -> Ptr () -> Ptr ()  -> IO CInt
-foreign import CALLCONV SAFE_ON_WIN "WSARecvMsg"
-  c_recvmsg :: CSocket -> Ptr (MsgHdr SockAddr) -> LPDWORD -> Ptr () -> Ptr () -> IO CInt
+-- WSASendMsg and WSARecvMsg are extension functions and cannot be
+-- imported by name; see Network.Socket.Win32.Load.
 #endif
