@@ -8,7 +8,6 @@
   [#614](https://github.com/haskell/network/pull/614)
 * Watchdog scheme for gracefulClose.
   [#620](https://github.com/haskell/network/pull/620)
-* Exporting recvBufNoWait.
 * Support for getHostName
   [#621](https://github.com/haskell/network/pull/621)
 * Fixing the misspelled WSAEACCES error description on Windows.
@@ -18,6 +17,10 @@
   [#626](https://github.com/haskell/network/pull/626)
 * WINIO: fixing a spurious EOF when a recv completes synchronously.
   [#626](https://github.com/haskell/network/pull/626)
+
+## Version 3.2.9.0
+
+* Exporting recvBufNoWait.
 
 ## Version 3.2.8.0
 
